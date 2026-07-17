@@ -1,0 +1,85 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Niche {
+  id               String    @id @default(uuid())
+  name             String    @unique
+  growthRate       Float     // Percentage growth over last 30 days
+  opportunityScore Float     // (Demand / Competition ratio)
+  totalViews       BigInt    @default(0)
+  creatorDensity   Float     // Competition factor
+  status           String    // "RISING" | "STABLE" | "SATURATED" | "DECLINING"
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  channels         Channel[]
+  contentGaps      ContentGap[]
+}
+
+model Channel {
+  id               String    @id @default(uuid())
+  youtubeId        String    @unique
+  name             String
+  subscriberCount  Int
+  totalViews       BigInt
+  uploadFrequency  Float     // Avg weekly shorts uploads
+  consistencyScore Float     // Percentage of shorts matching or passing median baseline
+  status           String    // "NEW" | "EMERGING" | "EXPLODING" | "ESTABLISHED"
+  nicheId          String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  niche            Niche?    @relation(fields: [nicheId], references: [id])
+  shorts           Short[]
+  analysis         ChannelAnalysis?
+}
+
+model Short {
+  id               String    @id @default(uuid())
+  youtubeId        String    @unique
+  title            String
+  thumbnailUrl     String
+  publishedAt      DateTime
+  views            Int
+  likes            Int
+  comments         Int
+  duration         Int       // in seconds
+  viewVelocity     Float     // Views per hour since publishing
+  growthVelocity   Float     // Rate of acceleration over past 24h
+  trendScore       Float     // Unified score metric
+  hookStyle        String?
+  channelId        String
+  createdAt        DateTime  @default(now())
+
+  channel          Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+}
+
+model ChannelAnalysis {
+  id             String   @id @default(uuid())
+  channelId      String   @unique
+  commonHooks    String[]
+  videoStructure String   // Descriptive JSON or layout string
+  avgDuration    Float
+  postingSchedule String
+  titlePatterns  String[]
+  updatedAt      DateTime @updatedAt
+
+  channel        Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+}
+
+model ContentGap {
+  id               String   @id @default(uuid())
+  topic            String
+  gapScore         Float    // Search interest + view growth - density
+  estimatedViews   Int
+  competitionLevel String   // "LOW" | "MEDIUM" | "HIGH"
+  nicheId          String
+  createdAt        DateTime @default(now())
+
+  niche            Niche    @relation(fields: [nicheId], references: [id], onDelete: Cascade)
+}
