@@ -9,7 +9,7 @@ export async function GET() {
         channel: {
           subscriberCount: {
             lt: 50000, 
-            gt: 0 
+            gt: 0 // Prevent division by zero
           }
         }
       },
@@ -35,9 +35,13 @@ export async function GET() {
       };
     });
 
+    // Sort by the highest VSR (The biggest algorithmic anomalies)
     evaluatedShorts.sort((a, b) => b.vsr - a.vsr);
+
+    // Take the top 10 absolute craziest outliers
     const topOutliers = evaluatedShorts.slice(0, 10);
     
+    // Format the data for the AI prompt
     const outlierDataForAI = topOutliers.map(o => 
       `Title: "${o.title}" | Views: ${o.views} | Channel Subs: ${o.channel?.subscriberCount} | VSR: ${o.vsr.toFixed(1)}x`
     ).join('\n');
@@ -51,7 +55,7 @@ export async function GET() {
       ${outlierDataForAI}
       
       Analyze this raw data and find the most viable niche for a completely new creator to start today.
-      Return ONLY a raw JSON object.
+      Return ONLY a raw JSON object. Ensure it is valid JSON.
       {
         "niche": "Name of the discovered niche based on the data",
         "confidenceScore": 95,
@@ -75,12 +79,12 @@ export async function GET() {
         "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
       },
       body: JSON.stringify({
-        model: "llama3-70b-8192",
+        model: "llama-3.3-70b-versatile",
         messages: [
           { role: "user", content: prompt }
         ],
         temperature: 0.7,
-        response_format: { type: "json_object" } // Forces Groq to output pure JSON
+        response_format: { type: "json_object" }
       })
     });
 
@@ -91,8 +95,11 @@ export async function GET() {
     const data = await response.json();
     const responseText = data.choices[0].message.content;
     
-    // Natively parse the guaranteed JSON
-    const premiumBlueprint = JSON.parse(responseText);
+    // Safety Net: Strip out any potential markdown backticks or conversational text before parsing
+    const cleanedJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    // Natively parse the JSON
+    const premiumBlueprint = JSON.parse(cleanedJson);
 
     return NextResponse.json(premiumBlueprint);
 
