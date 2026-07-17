@@ -1,10 +1,5 @@
-// Path: src/app/api/premium/route.ts
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-// Initialize the AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 export async function GET() {
   try {
@@ -14,7 +9,7 @@ export async function GET() {
         channel: {
           subscriberCount: {
             lt: 50000, 
-            gt: 0 // Prevent division by zero
+            gt: 0 
           }
         }
       },
@@ -40,20 +35,14 @@ export async function GET() {
       };
     });
 
-    // Sort by the highest VSR (The biggest algorithmic anomalies)
     evaluatedShorts.sort((a, b) => b.vsr - a.vsr);
-
-    // Take the top 10 absolute craziest outliers
     const topOutliers = evaluatedShorts.slice(0, 10);
     
-    // Format the data for the AI prompt
     const outlierDataForAI = topOutliers.map(o => 
       `Title: "${o.title}" | Views: ${o.views} | Channel Subs: ${o.channel?.subscriberCount} | VSR: ${o.vsr.toFixed(1)}x`
     ).join('\n');
 
-    // 3. The True AI Analysis
-    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
-    
+    // 3. The True AI Analysis via Groq
     const prompt = `
       You are an elite YouTube Shorts strategist. I am giving you a list of 10 "Outlier" videos. 
       These are videos from tiny channels that got massive views (high View-to-Subscriber Ratio).
@@ -62,7 +51,7 @@ export async function GET() {
       ${outlierDataForAI}
       
       Analyze this raw data and find the most viable niche for a completely new creator to start today.
-      Return ONLY a raw JSON object (no markdown, no backticks) in this exact format:
+      Return ONLY a raw JSON object.
       {
         "niche": "Name of the discovered niche based on the data",
         "confidenceScore": 95,
@@ -78,12 +67,32 @@ export async function GET() {
       }
     `;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    // Fetch directly from Groq's endpoint
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama3-70b-8192",
+        messages: [
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+        response_format: { type: "json_object" } // Forces Groq to output pure JSON
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Groq API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const responseText = data.choices[0].message.content;
     
-    // Clean the AI response to ensure it parses as pure JSON
-    const cleanedJson = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const premiumBlueprint = JSON.parse(cleanedJson);
+    // Natively parse the guaranteed JSON
+    const premiumBlueprint = JSON.parse(responseText);
 
     return NextResponse.json(premiumBlueprint);
 
