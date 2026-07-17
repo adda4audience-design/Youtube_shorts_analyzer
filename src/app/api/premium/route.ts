@@ -52,7 +52,7 @@ export async function GET() {
     ).join('\n');
 
     // 3. The True AI Analysis
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
     
     const prompt = `
       You are an elite YouTube Shorts strategist. I am giving you a list of 10 "Outlier" videos. 
