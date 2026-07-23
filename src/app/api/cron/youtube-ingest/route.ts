@@ -1,7 +1,10 @@
-// Path: src/app/api/cron/youtube-ingest/route.ts
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
 import prisma from '@/lib/prisma';
+
+// 1. Force Next.js to NEVER cache this route in production
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 const youtube = google.youtube({
   version: 'v3',
@@ -10,25 +13,29 @@ const youtube = google.youtube({
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
+  
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    console.warn("Cron Failed: Unauthorized access attempt");
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    let videoIds: string[] = [];
+    // 2. Log to prove the endpoint was successfully hit and authorized on Render
+    console.log("Cron Started: Authenticated successfully. Starting YouTube search...");
+
+    const videoIds: string[] = []; 
     let nextPageToken: string | undefined | null = '';
     
-    // We only want videos from the last 24 hours to calculate true explosive velocity
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     
     // 1. PAGINATION: Use Search API to force "Shorts Only" targeting
-    for (let i = 0; i < 2; i++) { // Fetch 100 results (2 pages of 50) to save quota
+    for (let i = 0; i < 2; i++) { 
       const searchRes = await youtube.search.list({
         part: ['id'],
-        q: '#shorts', // Target the universal shorts tag
+        q: '#shorts', 
         type: ['video'],
-        videoDuration: 'short', // Strictly under 4 minutes
-        order: 'viewCount', // Grab the most viral ones
+        videoDuration: 'short', 
+        order: 'viewCount', 
         publishedAfter: yesterday, 
         maxResults: 50,
         pageToken: nextPageToken || undefined,
@@ -42,11 +49,17 @@ export async function GET(request: Request) {
       if (!nextPageToken) break;
     }
 
-    if (videoIds.length === 0) return NextResponse.json({ message: "No shorts found." });
+    // 3. Log exactly how many IDs YouTube returned
+    console.log(`YouTube search complete. Found ${videoIds.length} video IDs.`);
+
+    if (videoIds.length === 0) {
+      console.warn("Cron Exiting Early: No shorts found from YouTube API. (Check Quota or Search Parameters)");
+      return NextResponse.json({ message: "No shorts found." });
+    }
 
     // 2. Fetch the actual statistics and tags for these specific videos
-    // The videos.list API can only take 50 IDs at a time, so we chunk them
-    let trendingShorts: any[] = [];
+    console.log("Fetching video stats...");
+    const trendingShorts: any[] = []; 
     for (let i = 0; i < videoIds.length; i += 50) {
       const chunk = videoIds.slice(i, i + 50);
       const statsRes = await youtube.videos.list({
@@ -54,7 +67,6 @@ export async function GET(request: Request) {
         id: chunk,
       });
       
-      // Double check duration to be strictly <= 60s
       const validShorts = (statsRes.data.items || []).filter((video) => {
         const durationStr = video.contentDetails?.duration || "PT0S";
         const isMinuteOrLess = durationStr.includes('M') ? durationStr === 'PT1M' || durationStr === 'PT1M0S' : true;
@@ -63,11 +75,12 @@ export async function GET(request: Request) {
       
       trendingShorts.push(...validShorts);
     }
+    console.log(`Filtered down to ${trendingShorts.length} valid shorts under 60 seconds.`);
 
     // 3. Extract unique Channel IDs to check their subscriber counts
     const channelIds = [...new Set(trendingShorts.map(v => v.snippet?.channelId).filter(Boolean))] as string[];
+    console.log(`Fetching stats for ${channelIds.length} unique channels...`);
     
-    // Batch request channel stats (chunked by 50)
     const channelStatsMap: Record<string, number> = {};
     for (let i = 0; i < channelIds.length; i += 50) {
       const chunk = channelIds.slice(i, i + 50);
@@ -84,11 +97,11 @@ export async function GET(request: Request) {
     let ingestedCount = 0;
 
     // 4. Process and save to DB
+    console.log("Starting database ingestion...");
     for (const video of trendingShorts) {
       const channelId = video.snippet?.channelId!;
       const subCount = channelStatsMap[channelId] || 0;
 
-      // Filter out massive established channels to focus on emerging ones
       let channelStatus = "NEW";
       if (subCount > 1000000) channelStatus = "ESTABLISHED";
       else if (subCount > 100000) channelStatus = "GROWING";
@@ -133,10 +146,12 @@ export async function GET(request: Request) {
       ingestedCount++;
     }
 
+    console.log(`SUCCESS: Ingested ${ingestedCount} shorts into the database.`);
     return NextResponse.json({ success: true, message: `Ingested ${ingestedCount} highly viral emerging shorts.` });
 
   } catch (error) {
-    console.error("Ingestion Error:", error);
-    return NextResponse.json({ error: "Failed" }, { status: 500 });
+    // 5. Catch and log ANY errors that happen during the process
+    console.error("CRON INGESTION ERROR:", error);
+    return NextResponse.json({ error: "Failed", details: String(error) }, { status: 500 });
   }
 }
