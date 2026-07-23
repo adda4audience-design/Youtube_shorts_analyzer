@@ -1,15 +1,47 @@
-// Path: src/app/api/dashboard/route.ts
 import { NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 
 // Force Next.js to NEVER cache this route so you always get fresh live data
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    // 1. Extract the timeRange parameter from the incoming URL
+    const { searchParams } = new URL(request.url);
+    const timeRange = searchParams.get("timeRange") || "48h"; 
+
+    // 2. Calculate the exact cutoff date based on the selected filter
+    const now = new Date();
+    let dateFilter = new Date();
+
+    switch (timeRange) {
+      case "24h":
+        dateFilter.setHours(now.getHours() - 24);
+        break;
+      case "72h":
+        dateFilter.setHours(now.getHours() - 72);
+        break;
+      case "7d":
+        dateFilter.setDate(now.getDate() - 7);
+        break;
+      case "30d":
+        dateFilter.setDate(now.getDate() - 30);
+        break;
+      case "48h":
+      default:
+        dateFilter.setHours(now.getHours() - 48);
+        break;
+    }
+
     const totalShortsCount = await prisma.short.count();
     
+    // 3. Apply the date filter to your Prisma query
     const viralShortsRaw = await prisma.short.findMany({
+      where: {
+        publishedAt: {
+          gte: dateFilter, // Only fetch shorts published AFTER this date
+        },
+      },
       include: {
         channel: {
           include: { niche: true }
@@ -18,8 +50,6 @@ export async function GET() {
       orderBy: { viewVelocity: 'desc' },
       take: 20,
     });
-
-   // Inside src/app/api/dashboard/route.ts
 
     const viralVideosFormatted = viralShortsRaw.map((video: any) => {
       // Calculate Outlier Score
@@ -42,12 +72,9 @@ export async function GET() {
           ? `${(video.views / 1000000).toFixed(1)}M` 
           : `${(video.views / 1000).toFixed(0)}k`,
         velocity: `${Math.round(video.viewVelocity).toLocaleString()} views/hr`,
-        niche: outlierBadge, // Replacing the static niche tag with our dynamic Outlier Badge
+        niche: outlierBadge, 
       };
     });
-
-    const totalViewsAgg = await prisma.short.aggregate({ _sum: { views: true } });
-    const totalDatabaseViews = totalViewsAgg._sum.views || 0;
 
     const dashboardData = {
       metrics: {
