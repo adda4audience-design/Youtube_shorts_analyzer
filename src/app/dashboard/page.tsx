@@ -1,8 +1,7 @@
-// Path: src/app/dashboard/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import { PlaySquare, Flame, TrendingUp, Users, ExternalLink } from "lucide-react";
+import { PlaySquare, Flame, TrendingUp, Users, ExternalLink, Clock } from "lucide-react";
 
 interface VideoCard {
   id: string;
@@ -34,12 +33,16 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // 1. Added state for the time filter (defaulting to 48 hours)
+  const [timeFilter, setTimeFilter] = useState("48h");
 
   useEffect(() => {
-    fetch("/api/dashboard")
+    setLoading(true); // Ensure it shows loading when changing filters
+    // 2. Pass the time filter as a URL query parameter
+    fetch(`/api/dashboard?timeRange=${timeFilter}`)
       .then((res) => res.json())
       .then((json) => {
-        // If the backend threw a 500 error, catch it and show it on screen
         if (json.error) {
           setError(json.error);
         } else {
@@ -51,9 +54,9 @@ export default function DashboardPage() {
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+  }, [timeFilter]); // 3. Re-run fetch whenever timeFilter changes
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <div className="flex h-[75vh] items-center justify-center">
         <div className="flex flex-col items-center gap-2 text-muted-foreground animate-pulse">
@@ -64,7 +67,6 @@ export default function DashboardPage() {
     );
   }
 
-  // Safety net: If data is missing or API failed, show the exact error visually
   if (error || !data || !data.viralVideos) {
     return (
       <div className="flex h-[75vh] items-center justify-center">
@@ -82,6 +84,7 @@ export default function DashboardPage() {
       
       {/* Analytics Summary Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* ... (Metrics cards remain exactly the same) ... */}
         <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
           <div className="flex justify-between items-start text-muted-foreground">
             <span className="text-xs font-bold uppercase tracking-wider">Scraped Assets</span>
@@ -121,15 +124,38 @@ export default function DashboardPage() {
 
       {/* Main Real-time Scraped Video Matrix */}
       <div>
-        <div className="flex items-center gap-2 mb-6">
-          <Flame className="w-5 h-5 text-accent-rose animate-pulse" />
-          <h2 className="text-xl font-extrabold text-foreground">High-Velocity Viral Material</h2>
+        {/* 4. Updated Header with the Dropdown Filter */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <div className="flex items-center gap-2">
+            <Flame className="w-5 h-5 text-accent-rose animate-pulse" />
+            <h2 className="text-xl font-extrabold text-foreground">High-Velocity Viral Material</h2>
+          </div>
+          
+          <div className="flex items-center gap-2 bg-card border border-border rounded-lg px-3 py-2 text-sm font-medium shadow-sm">
+            <Clock className="w-4 h-4 text-muted-foreground" />
+            <select
+              value={timeFilter}
+              onChange={(e) => setTimeFilter(e.target.value)}
+              disabled={loading}
+              className="bg-transparent border-none outline-none cursor-pointer text-foreground appearance-none disabled:opacity-50"
+            >
+              <option value="24h">Today (24 Hours)</option>
+              <option value="48h">Past 48 Hours</option>
+              <option value="72h">Past 72 Hours</option>
+              <option value="7d">Past Week</option>
+              <option value="30d">Past Month</option>
+            </select>
+          </div>
         </div>
 
-        {/* Safe optional chaining used here (?) to guarantee no crashes */}
-        {data.viralVideos?.length === 0 ? (
+        {/* Video Grid Area */}
+        {loading ? (
+          <div className="flex h-40 items-center justify-center text-muted-foreground animate-pulse">
+            Fetching {timeFilter} data...
+          </div>
+        ) : data.viralVideos?.length === 0 ? (
           <div className="bg-card border border-dashed border-border rounded-xl p-12 text-center text-muted-foreground">
-            <p>No high-velocity shorts found yet. Fire your ingestion request endpoint to fetch trends.</p>
+            <p>No high-velocity shorts found for this time period.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
@@ -168,7 +194,6 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="space-y-2 pt-1 border-t border-border/60">
-                    {/* Performance Metrics */}
                     <div className="flex justify-between items-center text-xs">
                       <span className="text-muted-foreground font-medium">Views Got:</span>
                       <span className="font-bold text-foreground bg-muted px-1.5 py-0.5 rounded">{video.views}</span>
@@ -178,7 +203,6 @@ export default function DashboardPage() {
                       <span className="font-extrabold text-accent-emerald">{video.velocity}</span>
                     </div>
 
-                    {/* Channel Redirect */}
                     <div className="pt-2">
                       <a 
                         href={video.channelUrl} 
@@ -193,7 +217,6 @@ export default function DashboardPage() {
                       </a>
                     </div>
                   </div>
-
                 </div>
 
               </div>
